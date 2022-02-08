@@ -4,7 +4,7 @@ DeepCOLOR is intended to analyze colocalization relation ships between single ce
 ## Instalation
 You can install deepCOLOR using pip command from your shell.
 ```shell
-pip install deepCOLOR
+pip install deepcolor  imgaug==0.2.5
 ```
 
 ## Usage
