@@ -292,8 +292,8 @@ def setup_dual_adata(dual_zl, sc_adata, high_coloc_index):
     dual_adata.obs['cell1_obsname'] = sc_adata.obs_names[high_coloc_index[:, 0]]
     dual_adata.obs['cell2_obsname'] = sc_adata.obs_names[high_coloc_index[:, 1]]
     dual_adata.obs_names = dual_adata.obs['cell1_obsname'] + dual_adata.obs['cell2_obsname']
-    cell_min = dual_adata.obs[['cell1_celltype', 'cell2_celltype']].astype(str).min(axis=1)
-    cell_max = dual_adata.obs[['cell1_celltype', 'cell2_celltype']].astype(str).max(axis=1)
+    cell_min = dual_adata.obs[['cell1_celltype', 'cell2_celltype']].astype(str).values.min(axis=1)
+    cell_max = dual_adata.obs[['cell1_celltype', 'cell2_celltype']].astype(str).values.max(axis=1)
     dual_adata.obs['dual_celltype'] = cell_min + '/' + cell_max
     return dual_adata
 
