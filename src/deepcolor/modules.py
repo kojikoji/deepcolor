@@ -172,6 +172,7 @@ class VaeSm(nn.Module):
         # deconst p
         p = self.dec_xz2p(xz).transpose(0, 1)
         p = p / p.sum(dim=1, keepdim=True)
+        assert p.isnan().any() == False, 'nanあり p=[{0}]'.format(p)
         # construct mean for s
         scoeff = self.softplus(self.logscoeff)
         scoeff_add = self.softplus(self.logscoeff_add)

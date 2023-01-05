@@ -1,7 +1,7 @@
 # evndyn
 import torch
 from .modules import VaeSm, scVAE
-from .funcs import calc_kld, calc_nb_loss
+from .funcs import calc_kld, calc_poisson_loss, calc_nb_loss
 from .dataset import VaeSmDataSet, VaeSmDataManager, VaeSmDataManagerDPP, ConcatDataset
 from torch.utils.data import DataLoader
 import numpy as np
@@ -40,7 +40,7 @@ class VaeSmExperiment:
             elbo_loss += calc_nb_loss(xld, xnorm_mat, theta_x, x).sum()
         if self.mode != 'sc':            
             # reconst loss of s
-            elbo_loss += calc_nb_loss(sld, snorm_mat, theta_s, s).sum()
+            elbo_loss += calc_poisson_loss(sld, snorm_mat, s).sum()
         return(elbo_loss)
         
     def train_epoch(self):

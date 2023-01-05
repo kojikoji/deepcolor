@@ -110,6 +110,13 @@ def calculate_clusterwise_distribution(sc_adata, sp_adata, cluster_label):
     sp_adata.obs = pd.concat([sp_adata.obs, cp_map_df], axis=1)
     return sp_adata
 
+def calculate_imputed_spatial_expression_cell_type(sc_adata, sp_adata, celltype_group, celltype):
+    cells = sc_adata.obs[celltype_group]==celltype
+    sc_norm_mat = sc_adata.layers['count'].toarray() / np.sum(sc_adata.layers['count'].toarray(), axis=1).reshape((-1, 1))
+    sp_adata.layers['imputed_exp_'+celltype] = np.matmul(
+        sp_adata.obsm['map2sc'][:,cells], sc_norm_mat[cells,:])
+    return sp_adata
+
 def calculate_imputed_spatial_expression(sc_adata, sp_adata):
     sc_norm_mat = sc_adata.layers['count'].toarray() / np.sum(sc_adata.layers['count'].toarray(), axis=1).reshape((-1, 1))
     sp_adata.layers['imputed_exp'] = np.matmul(
