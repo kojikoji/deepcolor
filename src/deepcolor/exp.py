@@ -10,7 +10,7 @@ import torch.nn as nn
 
 
 class VaeSmExperiment:
-    def __init__(self, model_params, lr, x, s, test_ratio, x_batch_size, s_batch_size, num_workers, validation_ratio=0.1, device='auto'):
+    def __init__(self, model_params, lr, x, s, test_ratio, x_batch_size, s_batch_size, num_workers, validation_ratio=0.1, device='auto', use_poisson=False):
         if device == 'auto':
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
@@ -29,6 +29,7 @@ class VaeSmExperiment:
         self.s = s.to(self.device)
         self.snorm_mat = snorm_mat.to(self.device)
         self.mode = 'sc'
+        self.use_poisson = use_poisson
 
     def elbo_loss(self, x, xnorm_mat, s, snorm_mat):
         xz, qxz, xld, p, sld, theta_x, theta_s = self.vaesm(x)
@@ -40,7 +41,10 @@ class VaeSmExperiment:
             elbo_loss += calc_nb_loss(xld, xnorm_mat, theta_x, x).sum()
         if self.mode != 'sc':            
             # reconst loss of s
-            elbo_loss += calc_poisson_loss(sld, snorm_mat, s).sum()
+            if self.use_poisson:
+                elbo_loss += calc_poisson_loss(sld, snorm_mat, s).sum()
+            else:
+                elbo_loss += calc_nb_loss(sld, snorm_mat, theta_s, s).sum()
         return(elbo_loss)
         
     def train_epoch(self):
