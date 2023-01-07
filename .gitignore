@@ -1,2 +1,6 @@
 *.pyc
 local_test
+data
+*~
+dist
+*.egg-info
