@@ -70,7 +70,7 @@ def extract_mapping_info(vaesm_exp, sc_adata, sp_adata):
 
 def estimate_spatial_distribution(
         sc_adata, sp_adata, param_save_path, layer_name='count', first_epoch=500, second_epoch=500, lr=0.001, val_ratio=0.01, test_ratio=0.01, device=None, num_workers=1,
-        x_batch_size=1000, s_batch_size=100, 
+        x_batch_size=1000, s_batch_size=100, use_poisson=False, 
         model_params = {
             "x_dim": 100,
             "s_dim": 100,
@@ -87,7 +87,7 @@ def estimate_spatial_distribution(
     x, s = make_inputs(sc_adata, sp_adata, layer_name)
     model_params['x_dim'] = x.size()[1]
     model_params['s_dim'] = s.size()[1]
-    vaesm_exp = VaeSmExperiment(model_params, lr, x, s, test_ratio, 100, 100, num_workers, validation_ratio=val_ratio, device=device)
+    vaesm_exp = VaeSmExperiment(model_params, lr, x, s, test_ratio, 100, 100, num_workers, validation_ratio=val_ratio, device=device, use_poisson=use_poisson)
     vaesm_exp = optimize_deepcolor(vaesm_exp, lr, x_batch_size, s_batch_size, first_epoch, second_epoch)
     torch.save(vaesm_exp.vaesm.state_dict(), param_save_path)
     sc_adata.uns['param_save_path'] = param_save_path
@@ -108,6 +108,13 @@ def calculate_clusterwise_distribution(sc_adata, sp_adata, cluster_label):
         celltype: np.sum(p_mat[:, sc_adata.obs[cluster_label] == celltype], axis=1)
         for celltype in celltypes}, index=sp_adata.obs_names)
     sp_adata.obs = pd.concat([sp_adata.obs, cp_map_df], axis=1)
+    return sp_adata
+
+def calculate_imputed_spatial_expression_cell_type(sc_adata, sp_adata, celltype_group, celltype):
+    cells = sc_adata.obs[celltype_group]==celltype
+    sc_norm_mat = sc_adata.layers['count'].toarray() / np.sum(sc_adata.layers['count'].toarray(), axis=1).reshape((-1, 1))
+    sp_adata.layers['imputed_exp_'+celltype] = np.matmul(
+        sp_adata.obsm['map2sc'][:,cells], sc_norm_mat[cells,:])
     return sp_adata
 
 def calculate_imputed_spatial_expression(sc_adata, sp_adata):
