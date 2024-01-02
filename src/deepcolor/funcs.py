@@ -7,7 +7,7 @@ def calc_kld(qz):
 
 
 def calc_poisson_loss(ld, norm_mat, obs):
-    p_z = dist.Poisson(ld * norm_mat)
+    p_z = dist.Poisson(ld * norm_mat + 1.0e-10)
     l = - p_z.log_prob(obs)
     return(l)
         

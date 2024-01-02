@@ -91,16 +91,42 @@ class scVAE(nn.Module):
             num_dec_z_layers, **kwargs):
         super(scVAE, self).__init__()
         self.enc_z = Encoder(num_enc_z_layers, x_dim, enc_z_h_dim, xz_dim)
-        self.dec_z2x = Decoder(num_enc_z_layers, xz_dim, dec_z_h_dim, x_dim)
+        self.dec_z2x = Decoder(num_dec_z_layers, xz_dim, dec_z_h_dim, x_dim)
         self.softplus = nn.Softplus()
 
-    def forward(self, x):
+    def forward(self, batch):
+        x, xnorm_mat = batch
         # encode z
         qz_mu, qz_logvar = self.enc_z(x)
         qz = dist.Normal(qz_mu, self.softplus(qz_logvar))
         z = qz.rsample()
         # decode z
         xld = self.dec_z2x(z)
+        return(z, qz, xld)
+
+
+class scVAEBatch(nn.Module):
+    def __init__(
+            self,
+            x_dim, xz_dim,
+            enc_z_h_dim, dec_z_h_dim,
+            num_enc_z_layers,
+            num_dec_z_layers, batch_num, **kwargs):
+        super(scVAEBatch, self).__init__()
+        self.enc_z = Encoder(num_enc_z_layers, x_dim + batch_num, enc_z_h_dim, xz_dim)
+        self.dec_z2x = Decoder(num_dec_z_layers, xz_dim + batch_num, dec_z_h_dim, x_dim)
+        self.softplus = nn.Softplus()
+
+    def forward(self, batch):
+        x, xnorm_mat, b = batch
+        # encode z
+        xb = torch.cat([x, b], dim=-1)
+        qz_mu, qz_logvar = self.enc_z(xb)
+        qz = dist.Normal(qz_mu, self.softplus(qz_logvar))
+        z = qz.rsample()
+        # decode z
+        zb = torch.cat([z, b], dim=-1)
+        xld = self.dec_z2x(zb)
         return(z, qz, xld)
 
 class scVAEScale(scVAE):
@@ -147,9 +173,14 @@ class VaeSm(nn.Module):
             self,
             s_num, x_dim, sz_dim,  xz_dim,
             enc_z_h_dim,  dec_z_h_dim, map_h_dim,
-            num_enc_z_layers, num_dec_z_layers, **kwargs):
+            num_enc_z_layers, num_dec_z_layers, batch_num=None, **kwargs):
         super(VaeSm, self).__init__()
-        self.scvae = scVAE(x_dim, xz_dim, enc_z_h_dim, dec_z_h_dim, num_enc_z_layers, num_dec_z_layers)
+        if batch_num is None:
+            self.scvae = scVAE(x_dim, xz_dim, enc_z_h_dim, dec_z_h_dim, num_enc_z_layers, num_dec_z_layers)
+            self.multi_batch = False
+        else:
+            self.scvae = scVAEBatch(x_dim, xz_dim, enc_z_h_dim, dec_z_h_dim, num_enc_z_layers, num_dec_z_layers, batch_num)
+            self.multi_batch = True
         self.dec_xz2p = Decoder(num_enc_z_layers, xz_dim, dec_z_h_dim, s_num)
         self.logscoeff = Parameter(torch.Tensor(x_dim))
         self.logscoeff_add = Parameter(torch.Tensor(x_dim))
@@ -165,9 +196,8 @@ class VaeSm(nn.Module):
         init.normal_(self.logtheta_x)
         init.normal_(self.logtheta_s)
         
-    def forward(self, x):
-        # encode xz
-        xz, qxz, xld = self.scvae(x)
+    def forward(self, batch):
+        xz, qxz, xld = self.scvae(batch)
         # encode sz
         # deconst p
         p = self.dec_xz2p(xz).transpose(0, 1)

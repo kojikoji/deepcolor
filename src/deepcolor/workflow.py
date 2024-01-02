@@ -4,10 +4,10 @@ import scanpy as sc
 import pandas as pd
 import numpy as np
 from .exp import VaeSmExperiment
-from plotnine import *
+# from plotnine import *
 import plotly.graph_objects as go
 import plotly.io as pio
-from .commons import make_edge_df
+from .commons import make_edge_df, make_batch_to_device
 from matplotlib import colors
 
 def safe_toarray(x):
@@ -16,7 +16,18 @@ def safe_toarray(x):
     else:
         return x
 
-def make_inputs(sc_adata, sp_adata, layer_name):
+
+def make_sample_one_hot_mat(adata, sample_key):
+    sidxs = np.sort(adata.obs[sample_key].unique())
+    sidx_num = sidxs.shape[0]
+    b = np.array([
+        (sidxs == sidx).astype(int)
+        for sidx in adata.obs[sample_key]]).astype(float)
+    b = torch.tensor(b).float()
+    return b
+
+
+def make_inputs(sc_adata, sp_adata, layer_name, batch_label=None):
     x = torch.tensor(safe_toarray(sc_adata.layers[layer_name]))
     s = torch.tensor(safe_toarray(sp_adata.layers[layer_name]))
     if (x - x.int()).norm() > 0:
@@ -29,7 +40,11 @@ def make_inputs(sc_adata, sp_adata, layer_name):
             raise ValueError('target layer of sp_adata should be raw count')
         except ValueError as e:
            print(e) 
-    return x, s
+    if not batch_label is None:
+        b = make_sample_one_hot_mat(sc_adata, batch_label)
+    else:
+        b = None
+    return x, s, b
 
 def optimize_deepcolor(vaesm_exp, lr, x_batch_size, s_batch_size, first_epoch, second_epoch):
     print(f'Loss: {vaesm_exp.evaluate()}')
@@ -58,7 +73,7 @@ def conduct_umap(adata, key):
 
 def extract_mapping_info(vaesm_exp, sc_adata, sp_adata):
     with torch.no_grad():
-        xz, qxz, xld, p, sld, theta_x, theta_s = vaesm_exp.vaesm(vaesm_exp.xedm.x.to(vaesm_exp.device))
+        xz, qxz, xld, p, sld, theta_x, theta_s = vaesm_exp.vaesm(make_batch_to_device(vaesm_exp.xedm.get_total_item(), vaesm_exp.device))
     sc_adata.obsm['X_zl'] = qxz.loc.detach().cpu().numpy()
     sc_adata.obsm['lambda'] = xld.detach().cpu().numpy()
     p_df = pd.DataFrame(p.detach().cpu().numpy().transpose(), index=sc_adata.obs_names, columns=sp_adata.obs_names)
@@ -77,17 +92,19 @@ def estimate_spatial_distribution(
             "xz_dim": 10, "sz_dim": 10,
             "enc_z_h_dim": 50, "dec_z_h_dim": 50, "map_h_dim": 50,
             "num_enc_z_layers": 2, "num_dec_z_layers": 2
-        }
+        }, batch_label=None
     ):
     if device == None:
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # make data set 
     sp_adata.obs_names_make_unique()
     sc_adata.obs_names_make_unique()
-    x, s = make_inputs(sc_adata, sp_adata, layer_name)
+    x, s, b = make_inputs(sc_adata, sp_adata, layer_name, batch_label)
     model_params['x_dim'] = x.size()[1]
     model_params['s_dim'] = s.size()[1]
-    vaesm_exp = VaeSmExperiment(model_params, lr, x, s, test_ratio, 100, 100, num_workers, validation_ratio=val_ratio, device=device, use_poisson=use_poisson)
+    if not b is None:
+        model_params['batch_num'] = b.size()[1]
+    vaesm_exp = VaeSmExperiment(model_params, lr, x, s, test_ratio, 100, 100, num_workers, validation_ratio=val_ratio, device=device, use_poisson=use_poisson, b=b)
     vaesm_exp = optimize_deepcolor(vaesm_exp, lr, x_batch_size, s_batch_size, first_epoch, second_epoch)
     torch.save(vaesm_exp.vaesm.state_dict(), param_save_path)
     sc_adata.uns['param_save_path'] = param_save_path
@@ -98,7 +115,8 @@ def estimate_spatial_distribution(
 
 
 def calculate_clusterwise_distribution(sc_adata, sp_adata, cluster_label):
-    p_mat = sp_adata.obsm['map2sc']
+    sp_adata = sp_adata.copy()
+    p_mat = sc_adata.obsm['map2sp'].transpose()
     celltypes = np.sort(np.unique(sc_adata.obs[cluster_label]))
     try:
         raise ValueError('some of cluster names in `cluster_label` is overlapped with `sp_adata.obs.columns`')
@@ -107,7 +125,7 @@ def calculate_clusterwise_distribution(sc_adata, sp_adata, cluster_label):
     cp_map_df = pd.DataFrame({
         celltype: np.sum(p_mat[:, sc_adata.obs[cluster_label] == celltype], axis=1)
         for celltype in celltypes}, index=sp_adata.obs_names)
-    sp_adata.obs = pd.concat([sp_adata.obs, cp_map_df], axis=1)
+    sp_adata.obs[cp_map_df.columns] = cp_map_df
     return sp_adata
 
 def calculate_imputed_spatial_expression_cell_type(sc_adata, sp_adata, celltype_group, celltype):
@@ -131,6 +149,8 @@ def estimate_colocalization(sc_adata):
     return sc_adata
 
 def make_coloc_mat(sc_adata):
+    if not 'p_mat' in sc_adata.obsm.keys():
+        sc_adata.obsm['p_mat'] = sc_adata.obsm['map2sp'] / np.sum(sc_adata.obsm['map2sp'], axis=1).reshape((-1, 1))
     p_mat = sc_adata.obsm['p_mat']
     coloc_mat = p_mat @ p_mat.transpose()
     coloc_mat = np.log2(coloc_mat) + np.log2(p_mat.shape[1])
@@ -239,7 +259,11 @@ def calculate_proximal_cell_communications(sc_adata, celltype_label, lt_df, targ
     edge_df = edge_df.loc[edge_df.cell1_type.isin(target_cellset)]
     edge_df = edge_df.loc[~edge_df.cell2_type.isin(target_cellset)]
     # select genes
-    sc.pp.highly_variable_genes(sc_adata, n_top_genes=ntop_genes)
+    try:
+        sc.pp.highly_variable_genes(sc_adata, n_top_genes=ntop_genes)
+    except:
+        sc_adata.uns['log1p']['base'] = None
+        sc.pp.highly_variable_genes(sc_adata, n_top_genes=ntop_genes)
     sc_adata = sc_adata[:, sc_adata.var.highly_variable]
     common_genes = np.intersect1d(lt_df.index, sc_adata.var_names)
     lt_df = lt_df.loc[common_genes]
@@ -319,6 +343,7 @@ def analyze_pair_cluster(sc_adata, sp_adata, cellset1, cellset2, celltype_label,
     dual_zl = make_dual_zl(sc_adata, high_coloc_index)
     dual_adata = setup_dual_adata(dual_zl, sc_adata, high_coloc_index)
     dual_adata = conduct_umap(dual_adata, 'X_zl')
+    sc.pp.neighbors(dual_adata, use_rep='X_zl')
     sc.tl.leiden(dual_adata, resolution=0.1)
     dual_adata.uns['large_class1'] = annot1
     dual_adata.uns['large_class2'] = annot2

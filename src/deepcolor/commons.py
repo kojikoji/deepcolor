@@ -1,28 +1,8 @@
 import torch
 import numpy as np
-from .exp import VaeSmExperiment
 import scanpy as sc
 import pandas as pd
 
-
-def define_exp(
-        x_fname, s_fname,
-        model_params = {
-            'x_dim': 100,
-            'z_dim': 10,
-            'enc_z_h_dim': 50, 'enc_d_h_dim': 50, 'dec_z_h_dim': 50,
-            'num_enc_z_layers': 2, 'num_enc_d_layers': 2,
-            'num_dec_z_layers': 2
-        },
-        lr=0.001, val_ratio=0.01, test_ratio=0.01, batch_ratio=0.05, num_workers=2, device='auto'):
-    x = torch.tensor(np.loadtxt(x_fname))
-    s = torch.tensor(np.loadtxt(s_fname))
-    model_params['x_dim'] = x.size()[1]
-    model_params['s_dim'] = s.size()[1]
-    x_batch_size = int(x.size()[0] * batch_ratio)
-    s_batch_size = int(s.size()[0] * batch_ratio)
-    vaesm_exp = VaeSmExperiment(model_params, lr, x, s, test_ratio, 100, 100, num_workers, validation_ratio=val_ratio, device=device)
-    return(vaesm_exp)
 
 
 # defining useful function
@@ -166,3 +146,6 @@ def trancate_ext_val(vec, q=0.01):
 def make_count_vec(X, axis):
     count_vec = np.array(X.sum(axis=axis)).reshape(-1)
     return(count_vec)
+
+def make_batch_to_device(batch, device):
+    return([b.to(device) for b in batch])

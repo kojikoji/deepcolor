@@ -1,5 +1,6 @@
 # evndyn
 import torch
+from .commons import make_batch_to_device
 from .modules import VaeSm, scVAE
 from .funcs import calc_kld, calc_poisson_loss, calc_nb_loss
 from .dataset import VaeSmDataSet, VaeSmDataManager, VaeSmDataManagerDPP, ConcatDataset
@@ -10,13 +11,13 @@ import torch.nn as nn
 
 
 class VaeSmExperiment:
-    def __init__(self, model_params, lr, x, s, test_ratio, x_batch_size, s_batch_size, num_workers, validation_ratio=0.1, device='auto', use_poisson=False):
+    def __init__(self, model_params, lr, x, s, test_ratio, x_batch_size, s_batch_size, num_workers, b=None, validation_ratio=0.1, device='auto', use_poisson=False):
         if device == 'auto':
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
             self.device = torch.device(device)
-        self.sedm = VaeSmDataManager(s, test_ratio, x_batch_size, num_workers, validation_ratio=validation_ratio)
-        self.xedm = VaeSmDataManager(x, test_ratio, s_batch_size, num_workers, validation_ratio=validation_ratio)
+        self.sedm = VaeSmDataManager(s, test_ratio, x_batch_size, num_workers, validation_ratio=validation_ratio, b=b)
+        self.xedm = VaeSmDataManager(x, test_ratio, s_batch_size, num_workers, validation_ratio=validation_ratio, b=b)
         self.model_params = model_params
         self.vaesm = VaeSm(self.sedm.x.size()[0], **self.model_params)
         self.vaesm.to(self.device)
@@ -31,8 +32,9 @@ class VaeSmExperiment:
         self.mode = 'sc'
         self.use_poisson = use_poisson
 
-    def elbo_loss(self, x, xnorm_mat, s, snorm_mat):
-        xz, qxz, xld, p, sld, theta_x, theta_s = self.vaesm(x)
+    def elbo_loss(self, batch, s, snorm_mat):
+        x, xnorm_mat, *others = batch
+        xz, qxz, xld, p, sld, theta_x, theta_s = self.vaesm(batch)
         elbo_loss = 0
         if self.mode != 'sp':        
             # kld of pz and qz
@@ -50,12 +52,11 @@ class VaeSmExperiment:
     def train_epoch(self):
         total_loss = 0
         entry_num = 0
-        for x, xnorm_mat in self.xedm.train_loader:
-            x = x.to(self.device)
-            xnorm_mat = xnorm_mat.to(self.device)
+        for batch in self.xedm.train_loader:
+            batch = make_batch_to_device(batch, self.device)
             self.vaesm_optimizer.zero_grad()
             loss = self.elbo_loss(
-                x, xnorm_mat, self.s, self.snorm_mat)
+                batch, self.s, self.snorm_mat)
             loss.backward()
             self.vaesm_optimizer.step()
         return(0)
@@ -64,13 +65,12 @@ class VaeSmExperiment:
         with torch.no_grad():
             self.vaesm.eval()
             if mode == 'test':            
-                x = self.xedm.test_x.to(self.device)
-                xnorm_mat = self.xedm.test_xnorm_mat.to(self.device)
+                batch = make_batch_to_device(self.xedm.get_test_item(), self.device)
             else:
-                x = self.xedm.validation_x.to(self.device)
-                xnorm_mat = self.xedm.validation_xnorm_mat.to(self.device)            
+                batch = make_batch_to_device(self.xedm.get_validation_item(), self.device)
+            x, xnorm_mat, *others = batch
             loss = self.elbo_loss(
-                x, xnorm_mat, self.s, self.snorm_mat)
+                batch, self.s, self.snorm_mat)
             entry_num = x.shape[0]
             loss_val = loss / entry_num
         return(loss_val)

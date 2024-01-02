@@ -50,11 +50,15 @@ class ConcatDataset(torch.utils.data.Dataset):
     
 
 class VaeSmDataManager():
-    def __init__(self, x, test_ratio, batch_size, num_workers, validation_ratio=0.1):
+    def __init__(self, x, test_ratio, batch_size, num_workers, validation_ratio=0.1, b=None):
         x = x.float()
         xnorm_mat = torch.mean(x, dim=1).view(-1, 1)
         self.x = x
         self.xnorm_mat = xnorm_mat
+        if not b is None:
+            b = b.float()
+            exp_batch_num = b.size()[1]
+        self.b = b
         total_num = x.size()[0]
         validation_num = int(total_num * validation_ratio)
         test_num = int(total_num * test_ratio)
@@ -62,18 +66,41 @@ class VaeSmDataManager():
         idx = np.random.permutation(np.arange(total_num))
         validation_idx, test_idx, train_idx = idx[:validation_num], idx[validation_num:(validation_num +  test_num)], idx[(validation_num +  test_num):]
         self.validation_idx, self.test_idx, self.train_idx = validation_idx, test_idx, train_idx
-        self.validation_x = x[validation_idx]
-        self.validation_xnorm_mat = xnorm_mat[validation_idx]
-        self.test_x = x[test_idx]
-        self.test_xnorm_mat = xnorm_mat[test_idx]
-        self.train_eds = VaeSmDataSet(x[train_idx], xnorm_mat[train_idx])
+        # # separate validation and test data
+        # self.validation_x = x[validation_idx]
+        # self.test_x = x[test_idx]
+        # self.validation_xnorm_mat = xnorm_mat[validation_idx]
+        # self.test_xnorm_mat = xnorm_mat[test_idx]
+        if not b is None:
+            # self.validation_b = b[validation_idx]
+            # self.test_b = b[test_idx]
+            self.train_eds = VaeSmDataSetMB(x[train_idx], xnorm_mat[train_idx], b[train_idx])
+        else:
+            self.train_eds = VaeSmDataSet(x[train_idx], xnorm_mat[train_idx])
         self.train_loader = torch.utils.data.DataLoader(
             self.train_eds, batch_size=batch_size, shuffle=True, num_workers=num_workers, drop_last=True, pin_memory=True)
 
     def initialize_loader(self, batch_size, num_workers=2):
         self.train_loader = torch.utils.data.DataLoader(
             self.train_eds, batch_size=batch_size, shuffle=True, num_workers=num_workers, drop_last=True, pin_memory=True)
+    
+    def get_item(self, idxs):
+        if not self.b is None:
+            return(self.x[idxs], self.xnorm_mat[idxs], self.b[idxs])
+        else:
+            return(self.x[idxs], self.xnorm_mat[idxs])
 
+    def get_validation_item(self):
+        return self.get_item(self.validation_idx)
+
+    def get_test_item(self):
+        return self.get_item(self.test_idx)
+
+    def get_total_item(self):
+        if not self.b is None:
+            return(self.x, self.xnorm_mat, self.b)
+        else:
+            return(self.x, self.xnorm_mat)
 
 class VaeSmDataManagerMB():
     def __init__(self, x, batch_idx, test_ratio, batch_size, num_workers, validation_ratio=0.1):
